@@ -1,4 +1,6 @@
 import express, { Request, Response } from 'express';
+import { loggerMiddleware } from './middlewares/logger.middleware';
+import { UserService } from './services/user.service';
 import { IUser } from './models/user';
 
 interface IError {
@@ -11,13 +13,10 @@ interface IParams {
 
 const app = express();
 const PORT = 3000;
+const userService = new UserService();
 
+app.use(loggerMiddleware);
 app.use(express.json());
-
-let users: IUser[] = [
-  { id: 1, name: 'John Doe', email: 'john.doe@example.com', isActive: true },
-  { id: 2, name: 'Jane Smith', email: 'jane.smith@example.com', isActive: false },
-];
 
 function isValidUser(body: unknown): body is Omit<IUser, 'id'> {
   if (typeof body !== 'object' || body === null) {
@@ -33,13 +32,35 @@ function isValidUser(body: unknown): body is Omit<IUser, 'id'> {
   );
 }
 
+function isValidUserUpdate(body: unknown): body is Partial<IUser> {
+  if (typeof body !== 'object' || body === null) {
+    return false;
+  }
+
+  const data = body as Partial<IUser>;
+
+  if (data.name !== undefined && typeof data.name !== 'string') {
+    return false;
+  }
+
+  if (data.email !== undefined && typeof data.email !== 'string') {
+    return false;
+  }
+
+  if (data.isActive !== undefined && typeof data.isActive !== 'boolean') {
+    return false;
+  }
+
+  return data.name !== undefined || data.email !== undefined || data.isActive !== undefined;
+}
+
 app.get('/users', (_req: Request, res: Response<IUser[]>) => {
-  res.json(users);
+  res.json(userService.getAll());
 });
 
 app.get('/users/:id', (req: Request<IParams>, res: Response<IUser | IError>) => {
   const id = Number(req.params.id);
-  const user = users.find((user) => user.id === id);
+  const user = userService.getById(id);
 
   if (!user) {
     res.status(404).json({ message: 'Usuário não encontrado' });
@@ -57,60 +78,41 @@ app.post('/users', (req: Request<object, IUser | IError, unknown>, res: Response
     return;
   }
 
-  const nextId = users.length > 0 ? Math.max(...users.map((user) => user.id)) + 1 : 1;
-  const newUser: IUser = {
-    id: nextId,
-    name: req.body.name,
-    email: req.body.email,
-    isActive: req.body.isActive,
-  };
+  const user = userService.create(req.body);
 
-  users.push(newUser);
-
-  res.status(201).json(newUser);
+  res.status(201).json(user);
 });
 
 app.put('/users/:id', (req: Request<IParams, IUser | IError, unknown>, res: Response<IUser | IError>) => {
   const id = Number(req.params.id);
 
-  if (!isValidUser(req.body)) {
+  if (!isValidUserUpdate(req.body)) {
     res.status(400).json({
-      message: 'Dados inválidos. Envie: { name: string, email: string, isActive: boolean }',
+      message: 'Dados inválidos. Envie ao menos um campo entre name (string), email (string) e isActive (boolean)',
     });
     return;
   }
 
-  const index = users.findIndex((user) => user.id === id);
-
-  if (index === -1) {
-    res.status(404).json({ message: 'Usuário não encontrado' });
-    return;
-  }
-
-  const updatedUser: IUser = {
-    id,
-    name: req.body.name,
-    email: req.body.email,
-    isActive: req.body.isActive,
-  };
-
-  users[index] = updatedUser;
-
-  res.json(updatedUser);
-});
-
-app.delete('/users/:id', (req: Request<IParams>, res: Response<IUser | IError>) => {
-  const id = Number(req.params.id);
-  const user = users.find((user) => user.id === id);
+  const user = userService.update(id, req.body);
 
   if (!user) {
     res.status(404).json({ message: 'Usuário não encontrado' });
     return;
   }
 
-  users = users.filter((user) => user.id !== id);
-
   res.json(user);
+});
+
+app.delete('/users/:id', (req: Request<IParams>, res: Response<IUser | IError>) => {
+  const id = Number(req.params.id);
+  const removed = userService.delete(id);
+
+  if (!removed) {
+    res.status(404).json({ message: 'Usuário não encontrado' });
+    return;
+  }
+
+  res.json(removed);
 });
 
 app.listen(PORT, () => {
